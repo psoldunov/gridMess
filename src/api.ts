@@ -7,6 +7,7 @@ export type Panel = {
 
 export type PanelElement = {
   id: string;
+  index: number;
   title: string;
   panelId: string;
 };
@@ -54,6 +55,7 @@ export function createElement(panelId: string, title?: string): PanelElement {
     id: uuidv4(),
     title: title || 'Element',
     panelId,
+    index: elements.filter((element: PanelElement) => element.panelId === panelId).length,
   };
   elements.push(element);
   localStorage.setItem('elements', JSON.stringify(elements));
