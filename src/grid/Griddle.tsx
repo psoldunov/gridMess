@@ -1,61 +1,31 @@
-import { useEffect, useMemo, useState } from 'react';
-import { DndContext, DragEndEvent, UniqueIdentifier, useDraggable, useDroppable } from '@dnd-kit/core';
-import { Responsive, WidthProvider } from 'react-grid-layout';
-import { Paper } from '@mantine/core';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+	DndContext,
+	DragEndEvent,
+	DragOverlay,
+	DragStartEvent,
+	UniqueIdentifier,
+	useDraggable,
+	useDroppable,
+} from '@dnd-kit/core';
+import { useAtom } from 'jotai';
+import { atomWithStorage } from 'jotai/utils';
+import { Layout, Responsive, WidthProvider } from 'react-grid-layout';
+import { Button, Group, Paper, Stack } from '@mantine/core';
+import { createElement, createPanel, getElements, getPanels, Panel, PanelElement, updateElement } from '../api';
 
-const defaultLayout: LayoutItem[] = [
-	{
-		x: 0,
-		y: 0,
-		w: 4,
-		h: 1,
-		i: '1',
-		static: false,
-	},
-	{
-		x: 4,
-		y: 0,
-		w: 4,
-		h: 1,
-		i: '2',
-		static: false,
-	},
-	{
-		x: 0,
-		y: 1,
-		w: 4,
-		h: 1,
-		i: '3',
-		static: false,
-	},
-	{
-		x: 4,
-		y: 1,
-		w: 4,
-		h: 1,
-		i: '4',
-		static: false,
-	},
-];
-
-type LayoutItem = {
-	i: string;
-	x: number;
-	y: number;
-	w: number;
-	h: number;
-	static: boolean;
-};
+const layoutAtom = atomWithStorage<{ lg: Layout[] }>('layouts', {
+	lg: [],
+});
 
 function Draggable({ id, children }: { id: UniqueIdentifier; children: React.ReactNode }) {
 	const { attributes, listeners, setNodeRef, transform } = useDraggable({
 		id,
 	});
-	const style = transform
-		? {
-				transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-			}
-		: undefined;
+
+	const style = {
+		transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+	};
 
 	return (
 		<button ref={setNodeRef} style={style} {...listeners} {...attributes}>
@@ -79,59 +49,111 @@ function Droppable({ id, children }: { id: UniqueIdentifier; children: React.Rea
 	);
 }
 
-export default function Griddle({ initialLayout = defaultLayout }: { initialLayout?: LayoutItem[] }) {
-	const [parent, setParent] = useState<UniqueIdentifier | null>(null);
+export default function Griddle() {
+	const [layouts, setLayouts] = useAtom(layoutAtom);
+	const [activeId, setActiveId] = useState<UniqueIdentifier | null>(null);
+	const [elements, setElements] = useState<PanelElement[]>(getElements());
 	const ResponsiveReactGridLayout = useMemo(() => WidthProvider(Responsive), []);
-	const draggableMarkup = useMemo(() => <Draggable id='draggable'>Drag me</Draggable>, []);
 	const [dragging, setDragging] = useState(false);
 
-	const [layouts, setLayouts] = useState({
-		lg: initialLayout || defaultLayout,
-	});
 	const [mounted, setMounted] = useState(false);
 
-	const handleDragStart = () => {
+	const createLayout = () => {
+		const newPanel: Panel = createPanel();
+		const newLayout = {
+			i: newPanel.id,
+			x: 0,
+			y: 0,
+			w: 1,
+			h: 1,
+		};
+		setLayouts((prevLayouts) => ({
+			...prevLayouts,
+			lg: [...prevLayouts.lg, newLayout],
+		}));
+	};
+
+	const createPanelElement = () => {
+		const firstPanel: Panel = getPanels()[0];
+		if (!firstPanel) {
+			alert('Please create a panel first');
+			return;
+		}
+		const title = prompt('Type here')!;
+		const newElement: PanelElement = createElement(firstPanel.id, title);
+		setElements((prevElements) => [...prevElements, newElement]);
+	};
+
+	const handleDragStart = (event: DragStartEvent) => {
 		setDragging(true);
+		setActiveId(event.active.id);
 	};
 
 	const handleDragEnd = (event: DragEndEvent) => {
-		const { over } = event;
-		setParent(over ? over.id : null);
+		const { over, active } = event;
+		updateElement(active.id as string, over?.id as string);
+		setElements(getElements());
 		setDragging(false);
+		setActiveId(null);
 	};
 
 	useEffect(() => {
 		setMounted(true);
 	}, []);
 
+	const generateDOM = useCallback(() => {
+		return layouts.lg.map((layout) => {
+			const panelElements = elements.filter((element) => element.panelId === layout.i);
+			return (
+				<Paper withBorder key={layout.i}>
+					<Droppable id={layout.i}>
+						{panelElements && panelElements.length > 0
+							? panelElements.map((panelElement) => (
+									<Draggable key={panelElement.id} id={panelElement.id}>
+										{panelElement.title || panelElement.id}
+									</Draggable>
+								))
+							: 'Drop here'}
+					</Droppable>
+				</Paper>
+			);
+		});
+	}, [layouts, elements]);
+
 	return (
-		<DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart}>
-			{parent === null ? draggableMarkup : null}
-			<ResponsiveReactGridLayout
-				cols={{ lg: 8, md: 8, sm: 4, xs: 2, xxs: 2 }}
-				rowHeight={240}
-				className='layout'
-				onLayoutChange={(newLayout) => {
-					const modifiedLayout = newLayout.map((item) => ({
-						...item,
-						static: item.static ?? false,
-					}));
-					setLayouts({ lg: modifiedLayout });
-				}}
-				layouts={layouts}
-				measureBeforeMount={false}
-				isDraggable={!dragging}
-				isResizable={!dragging}
-				useCSSTransforms={mounted}
-				compactType={null}
-				preventCollision={true}
-			>
-				{layouts.lg.map((layout) => (
-					<Paper withBorder key={layout.i}>
-						<Droppable id={layout.i}>{parent === layout.i ? draggableMarkup : 'Drop here'}</Droppable>
-					</Paper>
-				))}
-			</ResponsiveReactGridLayout>
-		</DndContext>
+		<Stack>
+			<Group>
+				<Button onClick={() => createLayout()}>Create Panel</Button>
+				<Button onClick={() => createPanelElement()}>Create Element</Button>
+			</Group>
+			<DndContext onDragEnd={handleDragEnd} onDragStart={handleDragStart}>
+				<ResponsiveReactGridLayout
+					cols={{ lg: 8, md: 8, sm: 4, xs: 2, xxs: 2 }}
+					rowHeight={240}
+					className='layout'
+					onLayoutChange={(newLayout) => {
+						setLayouts({ lg: newLayout });
+					}}
+					layouts={layouts}
+					measureBeforeMount={false}
+					isDraggable={!dragging}
+					isResizable={!dragging}
+					useCSSTransforms={mounted}
+					compactType={'vertical'}
+					preventCollision={true}
+				>
+					{generateDOM()}
+				</ResponsiveReactGridLayout>
+				<DragOverlay>
+					{elements.map((element) =>
+						element.id === activeId ? (
+							<div key={element.id}>
+								<Draggable id={element.id}>{element.title || element.id}</Draggable>
+							</div>
+						) : null
+					)}
+				</DragOverlay>
+			</DndContext>
+		</Stack>
 	);
 }
